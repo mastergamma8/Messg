@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Glass Messenger</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        :root {
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.2);
+            --glass-highlight: rgba(255, 255, 255, 0.1);
+            --accent: #00f2ff;
+            --accent-glow: #00f2ff80;
+            --text-main: #ffffff;
+            --text-sec: #aaaaaa;
+            --bg-dark: #0f0f13;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            height: 100vh;
+            overflow: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 20%, #2a1b3d 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, #0d324d 0%, transparent 40%);
+        }
+
+        /* Эффект жидкого стекла */
+        .glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+            border-radius: 20px;
+        }
+
+        /* Экраны */
+        #login-screen, #chat-list, #chat-room {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.4s ease;
+        }
+
+        .hidden { transform: translateX(100%); z-index: 0; }
+        .active { transform: translateX(0); z-index: 10; }
+
+        /* Login */
+        #login-screen {
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .login-card {
+            width: 100%;
+            max-width: 350px;
+            padding: 30px;
+            text-align: center;
+        }
+
+        input {
+            width: 100%;
+            padding: 15px;
+            margin: 10px 0;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            color: white;
+            font-size: 16px;
+            outline: none;
+            box-sizing: border-box;
+        }
+        
+        input:focus { border-color: var(--accent); }
+
+        button {
+            width: 100%;
+            padding: 15px;
+            background: var(--accent);
+            border: none;
+            border-radius: 12px;
+            font-weight: bold;
+            color: #000;
+            cursor: pointer;
+            box-shadow: 0 0 15px var(--accent-glow);
+            transition: 0.3s;
+        }
+
+        /* Список чатов */
+        .header {
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        .contact-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .contact-item {
+            padding: 15px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        
+        .contact-item:active { transform: scale(0.98); background: var(--glass-highlight); }
+
+        .avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, #ff00cc, #3333ff);
+            margin-right: 15px;
+        }
+
+        /* Поиск */
+        .search-area { padding: 10px 20px; }
+
+        /* Окно чата */
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .message {
+            max-width: 75%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            font-size: 14px;
+            line-height: 1.4;
+            position: relative;
+        }
+
+        .msg-in {
+            align-self: flex-start;
+            background: rgba(255, 255, 255, 0.1);
+            border-bottom-left-radius: 4px;
+        }
+
+        .msg-out {
+            align-self: flex-end;
+            background: rgba(0, 242, 255, 0.2);
+            border: 1px solid rgba(0, 242, 255, 0.3);
+            border-bottom-right-radius: 4px;
+            color: #fff;
+        }
+
+        .chat-input {
+            padding: 15px;
+            display: flex;
+            gap: 10px;
+            background: rgba(0,0,0,0.2);
+            backdrop-filter: blur(20px);
+        }
+        
+        .chat-input input { margin: 0; }
+        .chat-input button { width: auto; padding: 0 20px; }
+
+        /* Back button */
+        .back-btn {
+            background: none; border: none; color: white; font-size: 24px; width: auto; padding: 0; box-shadow: none;
+        }
+
+        /* Modal Search Results */
+        #search-results {
+            margin-top: 10px;
+        }
+        .search-res-item {
+            padding: 10px;
+            background: rgba(0,0,0,0.4);
+            margin-top: 5px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .add-btn { width: auto; padding: 5px 10px; font-size: 12px; }
+
+    </style>
+</head>
+<body>
+
+    <div id="login-screen" class="active">
+        <div class="glass-panel login-card">
+            <h2 style="margin-bottom: 30px;">GLASS CHAT</h2>
+            <input type="text" id="username-input" placeholder="Твой никнейм...">
+            <button onclick="login()">ВОЙТИ</button>
+        </div>
+    </div>
+
+    <div id="chat-list" class="hidden glass-panel" style="border-radius: 0;">
+        <div class="header">
+            <h3 id="my-username">Profile</h3>
+        </div>
+        
+        <div class="search-area">
+            <input type="text" id="search-input" placeholder="Найти пользователя..." oninput="searchUsers()">
+            <div id="search-results"></div>
+        </div>
+
+        <div class="contact-list" id="contacts-container">
+            </div>
+    </div>
+
+    <div id="chat-room" class="hidden glass-panel" style="border-radius: 0;">
+        <div class="header" style="background: rgba(0,0,0,0.2);">
+            <button class="back-btn" onclick="closeChat()">←</button>
+            <h3 id="chat-with-name" style="margin:0;">User</h3>
+            <div style="width: 24px;"></div>
+        </div>
+
+        <div class="chat-messages" id="messages-area">
+            </div>
+
+        <div class="chat-input">
+            <input type="text" id="msg-input" placeholder="Сообщение...">
+            <button onclick="sendMessage()">➤</button>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let currentUser = '';
+        let currentChatPartner = '';
+
+        // --- ЛОГИКА ВХОДА ---
+        async function login() {
+            const username = document.getElementById('username-input').value;
+            if(!username) return;
+
+            const res = await fetch('/login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username})
+            });
+            const data = await res.json();
+            
+            if(data.status === 'success') {
+                currentUser = data.username;
+                document.getElementById('my-username').innerText = currentUser;
+                
+                // Подключаемся к сокету
+                socket.emit('join', {username: currentUser});
+                
+                loadContacts();
+                switchScreen('chat-list');
+            }
+        }
+
+        // --- НАВИГАЦИЯ ---
+        function switchScreen(id) {
+            document.querySelectorAll('body > div').forEach(el => {
+                el.classList.add('hidden');
+                el.classList.remove('active');
+            });
+            document.getElementById(id).classList.remove('hidden');
+            document.getElementById(id).classList.add('active');
+        }
+
+        // --- ПОИСК И КОНТАКТЫ ---
+        async function searchUsers() {
+            const query = document.getElementById('search-input').value;
+            if(query.length < 2) {
+                document.getElementById('search-results').innerHTML = '';
+                return;
+            }
+            const res = await fetch('/search_user', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({query})
+            });
+            const users = await res.json();
+            
+            const html = users.map(u => `
+                <div class="search-res-item">
+                    <span>${u}</span>
+                    <button class="add-btn" onclick="addContact('${u}')">+</button>
+                </div>
+            `).join('');
+            document.getElementById('search-results').innerHTML = html;
+        }
+
+        async function addContact(username) {
+            await fetch('/add_contact', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username})
+            });
+            document.getElementById('search-input').value = '';
+            document.getElementById('search-results').innerHTML = '';
+            loadContacts();
+        }
+
+        async function loadContacts() {
+            const res = await fetch('/get_contacts');
+            const contacts = await res.json();
+            
+            const html = contacts.map(c => `
+                <div class="contact-item glass-panel" onclick="openChat('${c}')">
+                    <div class="avatar"></div>
+                    <span>${c}</span>
+                </div>
+            `).join('');
+            document.getElementById('contacts-container').innerHTML = html;
+        }
+
+        // --- ЧАТ ---
+        async function openChat(partner) {
+            currentChatPartner = partner;
+            document.getElementById('chat-with-name').innerText = partner;
+            document.getElementById('messages-area').innerHTML = ''; // Чистим
+            
+            // Загружаем историю
+            const res = await fetch('/get_history', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({partner})
+            });
+            const msgs = await res.json();
+            msgs.forEach(renderMessage);
+            
+            switchScreen('chat-room');
+            scrollToBottom();
+        }
+
+        function closeChat() {
+            currentChatPartner = '';
+            switchScreen('chat-list');
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('msg-input');
+            const text = input.value;
+            if(!text) return;
+
+            socket.emit('send_message', {
+                sender: currentUser,
+                receiver: currentChatPartner,
+                text: text
+            });
+            input.value = '';
+        }
+
+        function renderMessage(data) {
+            const isMe = data.sender === currentUser;
+            const div = document.createElement('div');
+            div.className = `message ${isMe ? 'msg-out' : 'msg-in'}`;
+            div.innerText = data.text;
+            document.getElementById('messages-area').appendChild(div);
+            scrollToBottom();
+        }
+
+        function scrollToBottom() {
+            const area = document.getElementById('messages-area');
+            area.scrollTop = area.scrollHeight;
+        }
+
+        // Прием сообщений
+        socket.on('new_message', (data) => {
+            // Если открыт чат с этим человеком ИЛИ это мое сообщение
+            if (currentChatPartner === data.sender || currentChatPartner === data.receiver) {
+                renderMessage(data);
+            } else {
+                // Тут можно добавить уведомление в списке контактов
+                // Например, подсветить контакт
+            }
+        });
+
+    </script>
+</body>
+</html>
